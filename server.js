@@ -66,6 +66,7 @@ const kvGet = key => {
 const kvSet = (key, value) =>
   db.prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     .run(key, JSON.stringify(value));
+const kvDelete = key => db.prepare("DELETE FROM kv WHERE key = ?").run(key);
 
 const newInviteCode = () => crypto.randomBytes(4).toString("hex").toUpperCase();
 if (!kvGet("invite_code")) kvSet("invite_code", newInviteCode());
@@ -119,6 +120,8 @@ function tooManyFailures(keys) {
   });
 }
 function recordFailure(keys) {
+  // Forget windows that have ended, so failed logins with made-up usernames can't grow the map forever.
+  for (const [key, f] of failures) if (f.until < Date.now()) failures.delete(key);
   for (const [key] of keys) {
     const f = failures.get(key);
     if (!f || f.until < Date.now()) failures.set(key, { count: 1, until: Date.now() + 15 * 60e3 });
@@ -182,8 +185,10 @@ function checkBuildAllowed(user) {
 }
 function recordBuild(user) {
   const log = (kvGet("build_log") || []).filter(b => b.at > Date.now() - 864e5);
-  log.push({ userId: user.id, organiser: user.isOrganiser, at: Date.now() });
+  const at = Date.now();
+  log.push({ userId: user.id, organiser: user.isOrganiser, at });
   kvSet("build_log", log);
+  return at;
 }
 
 function buildPrompt(settings, travellers) {
@@ -351,6 +356,7 @@ async function runBuild(user) {
     kvSet("last_build", { ok: false, error, by: user.display_name, at: new Date().toISOString() });
   } finally {
     generating = null;
+    kvDelete("build_running");
   }
 }
 
@@ -478,7 +484,8 @@ const routes = {
     if (!db.prepare("SELECT 1 FROM prefs LIMIT 1").get()) throw new UserError(400, "Nobody has saved preferences yet.");
     checkBuildAllowed(user);
     generating = { by: user.display_name, startedAt: new Date().toISOString() };
-    recordBuild(user);
+    // Kept in kv as well as memory, so a build cut off by a restart can be reported at startup.
+    kvSet("build_running", { userId: user.id, by: user.display_name, at: recordBuild(user) });
     runBuild(user); // not awaited: see runBuild
     send(res, 202, stateFor(user));
   },
@@ -543,6 +550,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
+// A build still marked as running was cut off when the planner last stopped. Say so on the page,
+// and give the attempt back so it doesn't count toward the build limits.
+const interrupted = kvGet("build_running");
+if (interrupted) {
+  kvSet("last_build", { ok: false, error: "The planner was restarted while this build was running. Press Build again.",
+    by: interrupted.by, at: new Date().toISOString() });
+  kvSet("build_log", (kvGet("build_log") || []).filter(b => !(b.userId === interrupted.userId && b.at === interrupted.at)));
+  kvDelete("build_running");
+}
 server.listen(PORT, "0.0.0.0", () => {
   // Skip virtual adapters (WSL, Hyper-V, Docker, VMs) so only the real Wi-Fi/Ethernet address shows.
   const lan = Object.entries(os.networkInterfaces())
