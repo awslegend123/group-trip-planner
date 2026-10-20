@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Group Trip Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: route-line header band, tab strip, one working column (max 920px) per tab */
+:root {
+  --bg: #EEF2F0; --surface: #FFFFFF; --ink: #14231F; --muted: #56675F; --line: #D3DCD8;
+  --accent: #1F4FD8; --accent-ink: #FFFFFF; --accent-soft: #E3EAFC;
+  --sun: #E89A1C; --sun-soft: #FCEFD6; --chip: #E4EBE8; --ok: #1E7F52; --bad: #B23B2E;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0E1513; --surface: #16201D; --ink: #E5EDEA; --muted: #95A69F; --line: #2A3833;
+  --accent: #86A2FF; --accent-ink: #0A1022; --accent-soft: #1D2747;
+  --sun: #F2B54C; --sun-soft: #3A2D14; --chip: #22302B; --ok: #5CC892; --bad: #F08A7C; color-scheme: dark } }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px }
+.wrap { max-width: 920px; margin: 0 auto }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15 }
+h2 { font-size: 1.45rem; font-weight: 700 }
+h3 { font-size: 1.1rem; font-weight: 700 }
+p { margin: 0 }
+.muted { color: var(--muted) }
+.label { font-size: .72rem; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; color: var(--muted) }
+button, input, select, textarea { font: inherit; color: inherit }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+
+/* Auth */
+.auth { max-width: 400px; margin: 0 auto; padding-block: 56px 24px; display: grid; gap: 20px }
+.auth h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -.02em }
+.switch { display: flex; background: var(--chip); border-radius: 8px; padding: 3px }
+.switch button { flex: 1; border: 0; background: none; padding: 7px; border-radius: 6px; font-weight: 600; color: var(--muted); cursor: pointer }
+.switch button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .12) }
+
+/* Header */
+header { padding-block: 22px 18px; display: grid; gap: 14px }
+.topbar { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: .88rem; color: var(--muted) }
+.topbar button { background: none; border: 0; color: var(--accent); font-weight: 600; cursor: pointer; padding: 0 }
+.title-row { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px }
+header h1 { font-size: clamp(1.9rem, 5vw, 2.8rem); font-weight: 800; letter-spacing: -.02em }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; font-variant-numeric: tabular-nums }
+.stat b { font-family: var(--display); font-size: 1.3rem; display: block; line-height: 1 }
+.stat span { font-size: .75rem; color: var(--muted) }
+.route { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 0; min-height: 28px }
+.stop { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: .92rem }
+.stop i { width: 12px; height: 12px; border-radius: 50%; border: 3px solid var(--accent); background: var(--surface); flex: none }
+.stop:first-child i { background: var(--accent) }
+.leg { width: 34px; height: 0; border-top: 2px dashed var(--line); margin: 0 8px }
+.route .empty { color: var(--muted); font-size: .9rem }
+
+/* Tabs */
+nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-bottom: 22px; scrollbar-width: none }
+nav.tabs button { background: none; border: 0; padding: 10px 14px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center }
+nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent) }
+nav.tabs .count { font-size: .72rem; background: var(--chip); border-radius: 99px; padding: 1px 7px; font-variant-numeric: tabular-nums }
+
+.panel { display: grid; gap: 20px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px }
+.stack { display: grid; gap: 14px }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px }
+
+label.field { display: grid; gap: 5px; font-weight: 600; font-size: .9rem; min-width: 0 }
+label.field small { font-weight: 400; color: var(--muted) }
+input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; width: 100%; min-width: 0 }
+textarea { resize: vertical; min-height: 64px }
+
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 16px; font-weight: 600; cursor: pointer }
+.btn:hover { border-color: var(--muted) }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+.btn.primary:hover { filter: brightness(1.08) }
+.btn:disabled { opacity: .5; cursor: not-allowed }
+.btn.small { padding: 5px 10px; font-size: .85rem }
+.status { font-size: .88rem; color: var(--muted) }
+.status.ok { color: var(--ok) } .status.bad { color: var(--bad) }
+.notice { background: var(--sun-soft); border-radius: 10px; padding: 12px 14px; font-size: .92rem }
+.code { font-family: var(--mono); font-size: 1.2rem; letter-spacing: .12em; background: var(--chip); padding: 4px 10px; border-radius: 6px; user-select: all }
+
+.dest-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: center }
+@media (max-width: 480px) { .dest-row { grid-template-columns: 1fr 80px auto } }
+
+.interests { display: grid; gap: 2px }
+.irow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line) }
+.irow:last-child { border-bottom: 0 }
+.seg { display: inline-flex; background: var(--chip); border-radius: 8px; padding: 3px; gap: 2px }
+.seg input { position: absolute; opacity: 0; pointer-events: none }
+.seg label { padding: 4px 10px; border-radius: 6px; font-size: .82rem; font-weight: 600; cursor: pointer; color: var(--muted) }
+.seg input:checked + label { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .12) }
+.seg input:checked + label.love { background: var(--sun); color: #2A1A00 }
+.seg input:focus-visible + label { outline: 2px solid var(--accent) }
+@media (max-width: 520px) { .irow { grid-template-columns: 1fr } .seg label { padding: 4px 8px } }
+
+.bars { display: grid; gap: 8px }
+.bar { display: grid; grid-template-columns: 170px minmax(0,1fr) 44px; gap: 10px; align-items: center; font-size: .9rem }
+.bar .track { height: 10px; background: var(--chip); border-radius: 99px; overflow: hidden }
+.bar .fill { height: 100%; background: var(--accent); border-radius: 99px }
+.bar.top .fill { background: var(--sun) }
+.bar .num { font-family: var(--mono); font-size: .8rem; text-align: right; color: var(--muted) }
+@media (max-width: 520px) { .bar { grid-template-columns: 110px minmax(0,1fr) 38px; font-size: .82rem } }
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px }
+.person { display: grid; gap: 8px; align-content: start }
+.chips { display: flex; flex-wrap: wrap; gap: 5px }
+.chip { background: var(--chip); border-radius: 99px; padding: 2px 9px; font-size: .78rem; font-weight: 600 }
+.chip.love { background: var(--sun-soft); color: var(--ink) }
+.chip.who { background: var(--accent-soft) }
+.slots { display: flex; gap: 6px; flex-wrap: wrap }
+.slot { width: 22px; height: 22px; border-radius: 50%; border: 2px dashed var(--line) }
+.slot.filled { border: 0; background: var(--accent) }
+.member { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap }
+.member:last-child { border-bottom: 0 }
+
+.readiness { display: grid; gap: 4px; font-size: .9rem }
+.readiness .ok::before { content: "✓ "; color: var(--ok); font-weight: 700 }
+.readiness .no::before { content: "○ "; color: var(--muted) }
+.day { display: grid; gap: 12px }
+.day-head { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap }
+.day-num { font-family: var(--display); font-weight: 800; font-size: 2rem; color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums }
+.day-head .where { font-weight: 700 }
+.item { display: grid; grid-template-columns: 58px 16px minmax(0,1fr); gap: 0 10px }
+.item .t { font-family: var(--mono); font-size: .8rem; color: var(--muted); padding-top: 2px; text-align: right }
+.item .dot { position: relative }
+.item .dot::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--line) }
+.item .dot::after { content: ""; position: absolute; left: 3px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent) }
+.item:last-child .dot::before { bottom: calc(100% - 10px) }
+.item .body { padding-bottom: 16px; display: grid; gap: 4px; min-width: 0 }
+.item .body b { font-size: 1rem }
+.item .place { font-size: .85rem; color: var(--muted) }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-top: 4px }
+.split > div { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px }
+.nearby { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px }
+.spot { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--line) }
+.spot:last-child { border-bottom: 0 }
+.progress { display: flex; gap: 10px; align-items: center }
+.spinner { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none } }
+</style>
+</head>
+<body>
+
+<!-- SIGN IN / CREATE ACCOUNT -->
+<main class="auth" id="auth" hidden>
+  <div class="stack" style="gap:6px">
+    <div class="label">Group trip planner</div>
+    <h1>Plan the trip together</h1>
+    <p class="muted">Sign in to add what you want from the trip and see the group's itinerary.</p>
+  </div>
+  <div class="switch" role="group" aria-label="Sign in or create account">
+    <button type="button" id="mode-login" aria-pressed="true">Sign in</button>
+    <button type="button" id="mode-register" aria-pressed="false">Create account</button>
+  </div>
+  <form class="card stack" id="auth-form" novalidate>
+    <p class="notice" id="first-note" hidden>You're the first person here, so your account becomes the organiser. You'll get a group code to share with everyone else. Create this account on the computer running the planner.</p>
+    <label class="field">Username<input type="text" id="a-user" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required></label>
+    <label class="field" id="a-name-wrap" hidden>Your name <small>What the group will see</small><input type="text" id="a-name" maxlength="40" autocomplete="nickname"></label>
+    <label class="field">Password<input type="password" id="a-pass" autocomplete="current-password" required></label>
+    <label class="field" id="a-code-wrap" hidden>Group code <small>Ask the organiser for it</small><input type="text" id="a-code" maxlength="20" autocapitalize="characters" spellcheck="false"></label>
+    <button class="btn primary" id="a-submit" type="submit">Sign in</button>
+    <p class="status bad" id="a-status" role="alert"></p>
+  </form>
+</main>
+
+<!-- APP -->
+<div class="wrap" id="app" hidden>
+  <header>
+    <div class="topbar"><span id="who"></span><button type="button" id="logout">Sign out</button></div>
+    <div class="title-row">
+      <div>
+        <div class="label">Group trip planner</div>
+        <h1 id="trip-name">Our trip</h1>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="stat-days">–</b><span>days</span></div>
+        <div class="stat"><b id="stat-stops">0</b><span>destinations</span></div>
+        <div class="stat"><b id="stat-resp">0/10</b><span>answered</span></div>
+      </div>
+    </div>
+    <div class="route" id="route"></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="prefs" aria-selected="true">My preferences</button>
+    <button role="tab" data-tab="group">Group <span class="count" id="tab-count">0</span></button>
+    <button role="tab" data-tab="plan">Itinerary</button>
+    <button role="tab" data-tab="trip">Trip details</button>
+  </nav>
+
+  <!-- MY PREFERENCES -->
+  <section class="panel" id="tab-prefs">
+    <div class="card stack">
+      <div><h2>What do you want from this trip?</h2>
+        <p class="muted">Fill this in whenever you like. You can come back and change it, and the itinerary uses the latest answers.</p></div>
+      <label class="field">Your name <small>What the group sees</small>
+        <input type="text" id="p-nick" maxlength="40"></label>
+    </div>
+    <div class="card stack">
+      <div><h3>Interests</h3><p class="muted">Rate each one. "Love" carries the most weight when the plan is built.</p></div>
+      <div class="interests" id="interests"></div>
+    </div>
+    <div class="card stack">
+      <h3>Pace and budget</h3>
+      <div class="grid2">
+        <div class="stack" style="gap:6px"><span class="label">Daily pace</span><div class="seg" id="p-pace"></div></div>
+        <div class="stack" style="gap:6px"><span class="label">Spending style</span><div class="seg" id="p-budget"></div></div>
+      </div>
+    </div>
+    <div class="card stack">
+      <h3>Specifics</h3>
+      <div class="grid2">
+        <label class="field">Must-do or must-see <small>Places, dishes, experiences</small>
+          <textarea id="p-must" maxlength="600" placeholder="e.g. Try proper ramen, sunrise at a viewpoint"></textarea></label>
+        <label class="field">Rather skip <small>Things you'd sit out</small>
+          <textarea id="p-avoid" maxlength="600" placeholder="e.g. Long queues, very early starts"></textarea></label>
+        <label class="field">Food needs <small>Diet, allergies</small>
+          <input type="text" id="p-diet" maxlength="200" placeholder="e.g. Vegetarian, no shellfish"></label>
+        <label class="field">Mobility or health notes <small>Anything that limits walking or activities</small>
+          <input type="text" id="p-mob" maxlength="200" placeholder="e.g. Bad knee, max 2 hours hiking"></label>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="p-save">Save my preferences</button>
+      <span class="status" id="p-status"></span>
+    </div>
+    <details class="card">
+      <summary style="cursor:pointer; font-weight:600">Change my password</summary>
+      <form class="stack" id="pw-form" style="margin-top:14px" novalidate>
+        <div class="grid2">
+          <label class="field">Current password<input type="password" id="pw-cur" autocomplete="current-password"></label>
+          <label class="field">New password <small>At least 8 characters</small><input type="password" id="pw-new" autocomplete="new-password"></label>
+        </div>
+        <div class="row"><button class="btn" type="submit">Update password</button><span class="status" id="pw-status"></span></div>
+      </form>
+    </details>
+  </section>
+
+  <!-- GROUP -->
+  <section class="panel" id="tab-group" hidden>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <h2>Where the group leans</h2>
+        <div class="slots" id="slots" aria-label="Responses"></div>
+      </div>
+      <p class="muted" id="group-sub"></p>
+      <div class="bars" id="bars"></div>
+    </div>
+    <div class="people" id="people"></div>
+  </section>
+
+  <!-- ITINERARY -->
+  <section class="panel" id="tab-plan" hidden>
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between; align-items:start">
+        <div class="stack" style="gap:6px">
+          <h2>Itinerary</h2>
+          <div class="readiness" id="readiness"></div>
+        </div>
+        <div class="row">
+          <button class="btn" id="g-copy" hidden>Copy as text</button>
+          <button class="btn primary" id="g-build">Build itinerary</button>
+        </div>
+      </div>
+      <div class="progress" id="g-progress" hidden><div class="spinner"></div><span id="g-progress-text">Working…</span></div>
+      <p class="status" id="g-status"></p>
+    </div>
+    <div id="plan" class="panel"></div>
+  </section>
+
+  <!-- TRIP DETAILS -->
+  <section class="panel" id="tab-trip" hidden>
+    <div class="card stack" id="organiser-card" hidden>
+      <div><h3>Invite the group</h3>
+        <p class="muted">Send everyone the address of this site and this group code. They need it once, to create their account.</p></div>
+      <div><span class="code" id="invite-code"></span></div>
+      <div>
+        <div class="label" style="margin-bottom:4px">Members</div>
+        <div id="members"></div>
+      </div>
+    </div>
+    <div class="card stack">
+      <div><h2>Trip details</h2><p class="muted">The basics everyone plans around. Anyone in the group can update these.</p></div>
+      <div class="grid2">
+        <label class="field">Trip name<input type="text" id="s-name" maxlength="80" placeholder="e.g. Japan, spring 2027"></label>
+        <label class="field">Start date <small>Optional</small><input type="date" id="s-start"></label>
+        <label class="field">Length (days)<input type="number" id="s-days" min="1" max="30" value="7"></label>
+        <label class="field">People going<input type="number" id="s-size" min="1" max="30" value="10"></label>
+      </div>
+    </div>
+    <div class="card stack">
+      <div><h3>Destinations</h3><p class="muted">In travel order. Nights are optional; leave blank and the planner will split the days.</p></div>
+      <div class="stack" id="s-dests" style="gap:8px"></div>
+      <div><button class="btn small" id="s-add" type="button">Add destination</button></div>
+    </div>
+    <div class="card stack">
+      <label class="field">Group budget<select id="s-budget">
+        <option value="">Not decided</option><option>Shoestring</option><option>Moderate</option><option>Comfortable</option><option>Splurge</option></select></label>
+      <label class="field">Anything else the planner should know <small>Flights, hotels already booked, fixed events</small>
+        <textarea id="s-notes" maxlength="1000" placeholder="e.g. Land in Osaka 10am day 1; fly home from Tokyo evening of the last day"></textarea></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="s-save">Save trip details</button>
+      <span class="status" id="s-status"></span>
+    </div>
+  </section>
+</div>
+
+<script>
+const INTERESTS = [
+  ["food", "Food & local eats"], ["markets", "Markets & street food"], ["cafes", "Cafés & desserts"],
+  ["scenery", "Scenery & viewpoints"], ["hiking", "Hiking & trails"], ["nature", "Parks & wildlife"],
+  ["water", "Beaches & water"], ["culture", "History & culture"], ["museums", "Museums & art"],
+  ["souvenirs", "Souvenirs & shopping"], ["photo", "Photo spots"], ["adventure", "Adventure activities"],
+  ["nightlife", "Nightlife & bars"], ["relax", "Spa & downtime"]
+];
+const LEVELS = ["Skip", "Fine", "Like", "Love"];
+const PACES = ["Relaxed", "Balanced", "Packed"];
+const BUDGETS = ["Save", "Mid", "Splurge"];
+
+const $ = id => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v; else if (k === "text") el.textContent = v; else el.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) el.append(k instanceof Node ? k : String(k));
+  return el;
+}
+const str = (v, n = 400) => typeof v === "string" ? v.slice(0, n) : (v == null ? "" : String(v).slice(0, n));
+function setStatus(el, text, kind = "") { el.textContent = text; el.className = "status" + (kind ? " " + kind : "") }
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method, credentials: "same-origin",
+    headers: body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {},
+    body: body !== undefined ? JSON.stringify(body) : (method !== "GET" ? "{}" : undefined),
+  });
+  let data = {};
+  try { data = await res.json() } catch {}
+  if (res.status === 401 && url !== "/api/login" && url !== "/api/password") { showAuth(); throw new Error("Please sign in.") }
+  if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
+  return data;
+}
+
+/* ---------- auth ---------- */
+let mode = "login", firstAccount = false;
+function setMode(m) {
+  mode = m;
+  $("mode-login").setAttribute("aria-pressed", m === "login");
+  $("mode-register").setAttribute("aria-pressed", m === "register");
+  $("a-name-wrap").hidden = m === "login";
+  $("a-code-wrap").hidden = m === "login" || firstAccount;
+  $("first-note").hidden = m === "login" || !firstAccount;
+  $("a-pass").autocomplete = m === "login" ? "current-password" : "new-password";
+  $("a-submit").textContent = m === "login" ? "Sign in" : "Create account";
+  $("a-status").textContent = "";
+}
+$("mode-login").onclick = () => setMode("login");
+$("mode-register").onclick = () => setMode("register");
+$("auth-form").onsubmit = async e => {
+  e.preventDefault();
+  const btn = $("a-submit"); btn.disabled = true; $("a-status").textContent = "";
+  try {
+    if (mode === "login") await api("POST", "/api/login", { username: $("a-user").value, password: $("a-pass").value });
+    else await api("POST", "/api/register", { username: $("a-user").value, displayName: $("a-name").value, password: $("a-pass").value, code: $("a-code").value });
+    $("a-pass").value = "";
+    await enterApp();
+  } catch (err) { $("a-status").textContent = err.message }
+  finally { btn.disabled = false }
+};
+function showAuth() {
+  stopPolling();
+  $("app").hidden = true; $("auth").hidden = false;
+  setMode(firstAccount ? "register" : mode);
+}
+$("logout").onclick = async () => { try { await api("POST", "/api/logout") } catch {} ; state = null; prefsFilled = settingsFilled = false; showAuth() };
+
+/* ---------- state ---------- */
+let state = null;
+let prefsDirty = false, settingsDirty = false, prefsFilled = false, settingsFilled = false;
+let pollTimer = null;
+function startPolling() { stopPolling(); pollTimer = setInterval(() => { if (!document.hidden) refresh() }, 15000) }
+function stopPolling() { clearInterval(pollTimer) }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state) refresh() });
+
+async function enterApp() {
+  $("auth").hidden = true; $("app").hidden = false;
+  await refresh(); startPolling();
+}
+async function refresh() {
+  try { applyState(await api("GET", "/api/state")) } catch {}
+}
+function applyState(s) {
+  state = s;
+  $("who").textContent = `Signed in as ${s.me.name}${s.me.isOrganizer ? " · organiser" : ""}`;
+  if (!prefsDirty) fillMyPrefs();
+  if (!settingsDirty) fillSettings();
+  renderHeader(); renderGroup(); renderOrganiser(); renderPlan();
+}
+
+/* ---------- tabs ---------- */
+const TABS = ["prefs", "group", "plan", "trip"];
+function showTab(t) {
+  if (!TABS.includes(t)) t = "prefs";
+  document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === t));
+  TABS.forEach(x => $("tab-" + x).hidden = x !== t);
+  try { localStorage.setItem("tab", t) } catch {}
+}
+document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+let startTab = location.hash.slice(1);
+if (!TABS.includes(startTab)) { try { startTab = localStorage.getItem("tab") } catch {} }
+showTab(startTab);
+
+/* ---------- preferences ---------- */
+function seg(container, name, options, love) {
+  options.forEach((o, i) => {
+    const id = `${name}-${i}`;
+    container.append(h("input", { type: "radio", name, id, value: i }), h("label", { for: id, class: i === 3 && love ? "love" : null, text: o }));
+  });
+}
+for (const [k, label] of INTERESTS) {
+  const s = h("div", { class: "seg", role: "radiogroup", "aria-label": label });
+  seg(s, "i-" + k, LEVELS, true);
+  $("interests").append(h("div", { class: "irow" }, h("span", { text: label }), s));
+}
+seg($("p-pace"), "pace", PACES); seg($("p-budget"), "pbudget", BUDGETS);
+function setRadio(name, v) { const el = document.querySelector(`input[name="${name}"][value="${v}"]`); if (el) el.checked = true }
+function getRadio(name, d = 1) { const el = document.querySelector(`input[name="${name}"]:checked`); return el ? +el.value : d }
+setRadio("pace", 1); setRadio("pbudget", 1); INTERESTS.forEach(([k]) => setRadio("i-" + k, 1));
+for (const id of ["p-nick", "interests", "p-pace", "p-budget", "p-must", "p-avoid", "p-diet", "p-mob"])
+  $(id).addEventListener("input", () => { prefsDirty = true; setStatus($("p-status"), "Unsaved changes") });
+
+function fillMyPrefs() {
+  $("p-nick").value = state.me.name;
+  const mine = state.prefs.find(p => p.id === state.me.id);
+  if (!mine) return;
+  INTERESTS.forEach(([k]) => setRadio("i-" + k, mine.interests?.[k] ?? 1));
+  setRadio("pace", mine.pace ?? 1); setRadio("pbudget", mine.budget ?? 1);
+  $("p-must").value = str(mine.mustDo, 600); $("p-avoid").value = str(mine.avoid, 600);
+  $("p-diet").value = str(mine.dietary, 200); $("p-mob").value = str(mine.mobility, 200);
+  if (!prefsFilled) { setStatus($("p-status"), "Your saved answers are loaded."); prefsFilled = true }
+}
+$("p-save").onclick = async () => {
+  const st = $("p-status"), name = $("p-nick").value.trim();
+  if (!name) { setStatus(st, "Add your name so the group knows who's who.", "bad"); return }
+  $("p-save").disabled = true; setStatus(st, "Saving…");
+  try {
+    if (name !== state.me.name) await api("PUT", "/api/me", { displayName: name });
+    const s = await api("PUT", "/api/prefs", {
+      interests: Object.fromEntries(INTERESTS.map(([k]) => [k, getRadio("i-" + k)])),
+      pace: getRadio("pace"), budget: getRadio("pbudget"),
+      mustDo: $("p-must").value, avoid: $("p-avoid").value, dietary: $("p-diet").value, mobility: $("p-mob").value,
+    });
+    prefsDirty = false; applyState(s); setStatus(st, "Saved. Thanks!", "ok");
+  } catch (err) { setStatus(st, err.message, "bad") }
+  finally { $("p-save").disabled = false }
+};
+$("pw-form").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    await api("POST", "/api/password", { current: $("pw-cur").value, next: $("pw-new").value });
+    $("pw-cur").value = $("pw-new").value = ""; setStatus($("pw-status"), "Password updated.", "ok");
+  } catch (err) { setStatus($("pw-status"), err.message, "bad") }
+};
+
+/* ---------- trip details ---------- */
+function markSettingsDirty() { settingsDirty = true; setStatus($("s-status"), "Unsaved changes") }
+function destRow(name = "", nights = "") {
+  const row = h("div", { class: "dest-row" },
+    h("input", { type: "text", maxlength: "80", placeholder: "City or region", "aria-label": "Destination", class: "d-name" }),
+    h("input", { type: "number", min: "0", max: "30", placeholder: "Nights", "aria-label": "Nights", class: "d-nights" }),
+    h("button", { class: "btn small", type: "button", text: "Remove" }));
+  row.querySelector(".d-name").value = name; row.querySelector(".d-nights").value = nights ?? "";
+  row.querySelector("button").onclick = () => { row.remove(); markSettingsDirty() };
+  row.addEventListener("input", markSettingsDirty);
+  $("s-dests").append(row);
+}
+$("s-add").onclick = () => { destRow(); markSettingsDirty() };
+for (const id of ["s-name", "s-start", "s-days", "s-size", "s-budget", "s-notes"]) $(id).addEventListener("input", markSettingsDirty);
+
+function fillSettings() {
+  const s = state.settings || {};
+  $("s-name").value = str(s.name, 80); $("s-start").value = str(s.startDate, 10);
+  $("s-days").value = s.days || 7; $("s-size").value = s.groupSize || 10;
+  $("s-budget").value = str(s.budget, 20); $("s-notes").value = str(s.notes, 1000);
+  $("s-dests").replaceChildren();
+  const d = Array.isArray(s.destinations) ? s.destinations : [];
+  if (d.length) d.forEach(x => destRow(str(x.name, 80), x.nights)); else destRow();
+  settingsFilled = true;
+}
+$("s-save").onclick = async () => {
+  const st = $("s-status");
+  $("s-save").disabled = true; setStatus(st, "Saving…");
+  try {
+    const s = await api("PUT", "/api/settings", {
+      name: $("s-name").value, startDate: $("s-start").value || null,
+      days: $("s-days").value, groupSize: $("s-size").value,
+      destinations: [...document.querySelectorAll("#s-dests .dest-row")].map(r => ({
+        name: r.querySelector(".d-name").value, nights: r.querySelector(".d-nights").value })),
+      budget: $("s-budget").value, notes: $("s-notes").value,
+    });
+    settingsDirty = false; applyState(s); setStatus(st, "Saved.", "ok");
+  } catch (err) { setStatus(st, err.message, "bad") }
+  finally { $("s-save").disabled = false }
+};
+
+function renderOrganiser() {
+  $("organiser-card").hidden = !state.me.isOrganizer;
+  if (!state.me.isOrganizer) return;
+  $("invite-code").textContent = state.inviteCode;
+  const list = $("members"); list.replaceChildren();
+  for (const m of state.members) {
+    const out = h("span", { class: "status" });
+    const btn = m.id === state.me.id ? null : h("button", { class: "btn small", type: "button", text: "Reset password" });
+    if (btn) btn.onclick = async () => {
+      if (btn.dataset.confirm !== "1") { btn.dataset.confirm = "1"; btn.textContent = "Click again to confirm"; return }
+      btn.disabled = true;
+      try { const r = await api("POST", "/api/reset-password", { userId: m.id }); out.textContent = `Temporary password: ${r.tempPassword}`; out.className = "status ok" }
+      catch (err) { setStatus(out, err.message, "bad") }
+      finally { btn.disabled = false; btn.dataset.confirm = ""; btn.textContent = "Reset password" }
+    };
+    list.append(h("div", { class: "member" },
+      h("div", {}, h("b", { text: m.name }), h("span", { class: "muted", text: ` @${m.username}${m.isOrganizer ? " · organiser" : ""}` })),
+      h("div", { class: "row", style: "gap:8px" }, out, btn)));
+  }
+}
+
+/* ---------- header and group ---------- */
+function renderHeader() {
+  const s = state.settings || {};
+  $("trip-name").textContent = s.name || "Our trip";
+  $("stat-days").textContent = s.days || "–";
+  const d = (s.destinations || []).filter(x => x?.name);
+  $("stat-stops").textContent = d.length;
+  $("stat-resp").textContent = `${state.prefs.length}/${s.groupSize || 10}`;
+  $("tab-count").textContent = state.prefs.length;
+  const r = $("route"); r.replaceChildren();
+  if (!d.length) r.append(h("span", { class: "empty", text: "No destinations yet. Add them under Trip details." }));
+  d.forEach((x, i) => {
+    if (i) r.append(h("span", { class: "leg" }));
+    r.append(h("span", { class: "stop" }, h("i"), x.name + (x.nights ? ` · ${x.nights}n` : "")));
+  });
+}
+function renderGroup() {
+  const n = state.prefs.length, size = state.settings?.groupSize || 10;
+  const slots = $("slots"); slots.replaceChildren();
+  for (let i = 0; i < Math.max(size, n); i++) slots.append(h("span", { class: "slot" + (i < n ? " filled" : ""), title: i < n ? state.prefs[i].name : "Waiting" }));
+  $("group-sub").textContent = n ? `${n} of ${size} have answered. Bars show average enthusiasm, 0 (skip) to 3 (love).` : "No one has answered yet. Ask everyone to fill in My preferences.";
+  const bars = $("bars"); bars.replaceChildren();
+  if (n) {
+    INTERESTS.map(([k, l]) => ({ l, avg: state.prefs.reduce((a, p) => a + (p.interests?.[k] ?? 1), 0) / n }))
+      .sort((a, b) => b.avg - a.avg)
+      .forEach((s, i) => bars.append(h("div", { class: "bar" + (i < 3 ? " top" : "") },
+        h("span", { text: s.l }),
+        h("div", { class: "track" }, h("div", { class: "fill", style: `width:${(s.avg / 3 * 100).toFixed(0)}%` })),
+        h("span", { class: "num", text: s.avg.toFixed(1) }))));
+  }
+  const ppl = $("people"); ppl.replaceChildren();
+  for (const p of state.prefs) {
+    const loves = INTERESTS.filter(([k]) => p.interests?.[k] === 3).map(([, l]) => l);
+    const likes = INTERESTS.filter(([k]) => p.interests?.[k] === 2).map(([, l]) => l);
+    ppl.append(h("div", { class: "card person" },
+      h("div", {}, h("b", { text: p.name + (p.id === state.me.id ? " (you)" : "") }),
+        h("div", { class: "muted", style: "font-size:.8rem", text: `${PACES[p.pace ?? 1]} pace · ${BUDGETS[p.budget ?? 1]} spending` })),
+      (loves.length || likes.length) ? h("div", { class: "chips" }, loves.map(l => h("span", { class: "chip love", text: "♥ " + l })), likes.map(l => h("span", { class: "chip", text: l }))) : null,
+      p.mustDo ? h("p", {}, h("span", { class: "label" }, "Must-do "), p.mustDo) : null,
+      p.avoid ? h("p", {}, h("span", { class: "label" }, "Skip "), p.avoid) : null,
+      p.dietary ? h("p", {}, h("span", { class: "label" }, "Food "), p.dietary) : null,
+      p.mobility ? h("p", {}, h("span", { class: "label" }, "Mobility "), p.mobility) : null));
+  }
+}
+
+/* ---------- itinerary ---------- */
+let building = false, buildStart = 0, buildTimer = null;
+function renderReadiness() {
+  const s = state.settings || {};
+  const dests = (s.destinations || []).length > 0, n = state.prefs.length, size = s.groupSize || 10;
+  $("readiness").replaceChildren(
+    h("span", { class: dests ? "ok" : "no", text: dests ? "Destinations set" : "Add destinations in Trip details" }),
+    h("span", { class: s.days ? "ok" : "no", text: s.days ? `${s.days} days` : "Set the trip length in Trip details" }),
+    h("span", { class: n ? "ok" : "no", text: `${n} of ${size} preferences in` + (n && n < size ? " (you can build now and rebuild later)" : "") }));
+  const othersBuilding = state.generating && !building;
+  $("g-build").disabled = building || othersBuilding || !(dests && s.days && n);
+  $("g-build").textContent = state.itinerary ? "Rebuild with latest answers" : "Build itinerary";
+  if (othersBuilding) { $("g-progress").hidden = false; $("g-progress-text").textContent = `${state.generating.by} is building the itinerary…` }
+  else if (!building) $("g-progress").hidden = true;
+  const it = state.itinerary;
+  if (it && !building && !$("g-status").classList.contains("bad")) {
+    const newer = state.prefs.some(p => p.updatedAt > it.generatedAt) || (s.updatedAt && s.updatedAt > it.generatedAt);
+    setStatus($("g-status"), newer ? "Answers or trip details changed since this plan was built. Rebuild to include them." : "");
+  }
+}
+function dayDate(i) {
+  const s = state.settings?.startDate; if (!s) return "";
+  const d = new Date(s + "T12:00:00"); if (isNaN(d)) return "";
+  d.setDate(d.getDate() + i);
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+function forChips(arr) {
+  return Array.isArray(arr) && arr.length ? h("div", { class: "chips" }, arr.slice(0, 12).map(n => h("span", { class: "chip who", text: str(n, 40) }))) : null;
+}
+function renderPlan() {
+  renderReadiness();
+  const root = $("plan"); root.replaceChildren();
+  const it = state.itinerary; $("g-copy").hidden = !it;
+  if (!it?.plan) {
+    root.append(h("div", { class: "card stack" }, h("h3", { text: "No itinerary yet" }),
+      h("p", { class: "muted", text: "Once trip details are in and people have shared their preferences, press Build itinerary. Claude weighs everyone's interests, fits the days to your destinations, and adds nearby spots worth knowing. The result is saved here for the whole group." })));
+    return;
+  }
+  const p = it.plan;
+  const when = new Date(it.generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  root.append(h("div", { class: "card stack" },
+    h("h2", { text: str(p.title, 120) || "The plan" }),
+    p.overview ? h("p", { text: str(p.overview, 1200) }) : null,
+    h("p", { class: "muted", style: "font-size:.85rem", text: `Built ${when} by ${it.generatedBy} from ${it.responses} people's answers. Suggestions come from Claude's general knowledge, so check opening hours and bookings before you go.` })));
+
+  (Array.isArray(p.days) ? p.days : []).forEach((d, i) => {
+    const tl = h("div", {});
+    (Array.isArray(d.items) ? d.items : []).forEach(x => {
+      const opts = Array.isArray(x.options) && x.options.length ? h("div", { class: "split" }, x.options.slice(0, 3).map(o => h("div", {},
+        h("b", { text: str(o.title, 120) }), o.detail ? h("span", { class: "muted", style: "font-size:.88rem", text: str(o.detail, 400) }) : null, forChips(o.for)))) : null;
+      tl.append(h("div", { class: "item" },
+        h("div", { class: "t", text: str(x.time, 12) }), h("div", { class: "dot" }),
+        h("div", { class: "body" },
+          h("div", { class: "row", style: "gap:8px" }, h("b", { text: str(x.title, 140) }), x.type ? h("span", { class: "chip", text: str(x.type, 30) }) : null),
+          x.place ? h("span", { class: "place", text: "📍 " + str(x.place, 160) }) : null,
+          x.detail ? h("span", { text: str(x.detail, 500) }) : null,
+          opts || forChips(x.for))));
+    });
+    root.append(h("div", { class: "card day" },
+      h("div", { class: "day-head" }, h("span", { class: "day-num", text: String(d.day ?? i + 1).padStart(2, "0") }),
+        h("div", {}, h("div", { class: "where", text: str(d.destination, 80) + (dayDate(i) ? " · " + dayDate(i) : "") }),
+          d.theme ? h("div", { class: "muted", text: str(d.theme, 160) }) : null)), tl));
+  });
+  if (Array.isArray(p.nearby) && p.nearby.length) {
+    root.append(h("div", { class: "card stack" }, h("h3", { text: "Nearby picks" }),
+      h("p", { class: "muted", text: "Local spots and landmarks close to each destination, for free time or swaps." }),
+      h("div", { class: "nearby" }, p.nearby.map(n => h("div", {}, h("div", { class: "label", text: str(n.destination, 80) }),
+        (Array.isArray(n.spots) ? n.spots : []).slice(0, 8).map(s => h("div", { class: "spot" },
+          h("div", { class: "row", style: "gap:8px" }, h("b", { text: str(s.name, 120) }), s.kind ? h("span", { class: "chip", text: str(s.kind, 30) }) : null),
+          s.why ? h("span", { class: "muted", style: "font-size:.88rem", text: str(s.why, 300) }) : null)))))));
+  }
+  if (Array.isArray(p.fairness) && p.fairness.length) {
+    root.append(h("div", { class: "card stack" }, h("h3", { text: "Something for everyone" }),
+      h("div", { class: "people" }, p.fairness.map(f => h("div", { class: "person" }, h("b", { text: str(f.name, 40) }), h("span", { class: "muted", text: str(f.highlights, 400) }))))));
+  }
+  if (Array.isArray(p.tips) && p.tips.length) {
+    root.append(h("div", { class: "card stack" }, h("h3", { text: "Tips for the group" }),
+      h("ul", { style: "margin:0; padding-left:20px; display:grid; gap:6px" }, p.tips.slice(0, 12).map(t => h("li", { text: str(t, 400) })))));
+  }
+}
+
+$("g-build").onclick = async () => {
+  if (building) return;
+  building = true; buildStart = Date.now();
+  setStatus($("g-status"), ""); $("g-build").disabled = true; $("g-progress").hidden = false;
+  const tick = () => $("g-progress-text").textContent = `Claude is weighing everyone's preferences… ${Math.round((Date.now() - buildStart) / 1000)}s (usually 1 to 3 minutes)`;
+  tick(); buildTimer = setInterval(tick, 1000);
+  try {
+    const s = await api("POST", "/api/itinerary");
+    building = false; applyState(s); setStatus($("g-status"), "Saved for the whole group.", "ok");
+  } catch (err) { building = false; setStatus($("g-status"), err.message, "bad"); renderReadiness() }
+  finally { clearInterval(buildTimer); $("g-progress").hidden = !state?.generating || building }
+};
+
+$("g-copy").onclick = async () => {
+  const p = state.itinerary?.plan; if (!p) return;
+  const lines = [p.title || "Itinerary", "", p.overview || ""];
+  (p.days || []).forEach((d, i) => {
+    lines.push("", `Day ${d.day ?? i + 1} · ${d.destination || ""}${dayDate(i) ? " · " + dayDate(i) : ""}${d.theme ? " — " + d.theme : ""}`);
+    (d.items || []).forEach(x => {
+      lines.push(`  ${x.time || ""}  ${x.title || ""}${x.place ? " @ " + x.place : ""}`);
+      (x.options || []).forEach(o => lines.push(`         or: ${o.title}${o.for?.length ? " (" + o.for.join(", ") + ")" : ""}`));
+    });
+  });
+  if (p.nearby?.length) { lines.push("", "Nearby picks"); p.nearby.forEach(n => lines.push(`  ${n.destination}: ${(n.spots || []).map(s => s.name).join(", ")}`)) }
+  try { await navigator.clipboard.writeText(lines.join("\n")); $("g-copy").textContent = "Copied" }
+  catch { $("g-copy").textContent = "Copy failed" }
+  setTimeout(() => $("g-copy").textContent = "Copy as text", 2000);
+};
+
+/* ---------- boot ---------- */
+(async () => {
+  try {
+    const s = await api("GET", "/api/session");
+    firstAccount = s.firstAccount;
+    if (s.user) await enterApp(); else showAuth();
+  } catch { showAuth() }
+})();
+</script>
+</body>
+</html>
