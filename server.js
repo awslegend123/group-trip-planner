@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const SESSION_DAYS = 30;
+const MAX_ACCOUNTS = 40; // well above the largest group size, so a leaked group code can't flood the group
 const scrypt = promisify(crypto.scrypt);
 
 /* ---------- shared option lists (sent to the page in /api/state) ---------- */
@@ -75,6 +76,8 @@ const userCount = () => db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
 async function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   return { salt, hash: (await scrypt(password, salt, 64)).toString("hex") };
 }
+// Checked against when a username doesn't exist, so a failed login takes as long either way.
+const DUMMY_USER = await hashPassword(crypto.randomBytes(16).toString("hex")).then(({ salt, hash }) => ({ salt, pass_hash: hash }));
 async function checkPassword(password, user) {
   const { hash } = await hashPassword(password, user.salt);
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(user.pass_hash, "hex"));
@@ -110,8 +113,9 @@ const clientIp = req =>
 
 /* ---------- login throttling ---------- */
 // 8 failures per username+address, and 20 per username from anywhere, in any 15 minutes.
+// Wrong group codes: 10 per address and 50 from anywhere. Wrong current passwords: 8 per account.
 const failures = new Map();
-const FAILURE_LIMITS = { ip: 8, user: 20 };
+const FAILURE_LIMITS = { ip: 8, user: 20, codeIp: 10, code: 50, password: 8 };
 function tooManyFailures(keys) {
   return keys.some(([key, limit]) => {
     const f = failures.get(key);
@@ -119,6 +123,7 @@ function tooManyFailures(keys) {
   });
 }
 function recordFailure(keys) {
+  if (failures.size > 10_000) for (const [k, f] of failures) if (f.until < Date.now()) failures.delete(k);
   for (const [key] of keys) {
     const f = failures.get(key);
     if (!f || f.until < Date.now()) failures.set(key, { count: 1, until: Date.now() + 15 * 60e3 });
@@ -410,7 +415,15 @@ const routes = {
     if (!displayName) throw new UserError(400, "Add the name the group should see.");
     if (password.length < 8) throw new UserError(400, "Passwords need at least 8 characters.");
     if (first && !isLocal(req)) throw new UserError(403, "The organiser account has to be created on the computer running the planner. Open http://localhost:" + PORT + " there first.");
-    if (!first && clean(b.code, 20).toUpperCase() !== kvGet("invite_code")) throw new UserError(403, "That group code doesn't match. Ask the organiser for it.");
+    if (!first) {
+      const codeKeys = [[`code|${clientIp(req)}`, FAILURE_LIMITS.codeIp], ["code|*", FAILURE_LIMITS.code]];
+      if (tooManyFailures(codeKeys)) throw new UserError(429, "Too many wrong group codes. Wait 15 minutes and try again.");
+      if (clean(b.code, 20).toUpperCase() !== kvGet("invite_code")) {
+        recordFailure(codeKeys);
+        throw new UserError(403, "That group code doesn't match. Ask the organiser for it.");
+      }
+      if (userCount() >= MAX_ACCOUNTS) throw new UserError(403, `The group already has ${MAX_ACCOUNTS} accounts. Ask the organiser.`);
+    }
     if (db.prepare("SELECT 1 FROM users WHERE username = ?").get(username)) throw new UserError(409, "That username is taken.");
     const { salt, hash } = await hashPassword(password);
     const { lastInsertRowid } = db.prepare(`INSERT INTO users (username, display_name, pass_hash, salt, is_organizer, created_at)
@@ -422,10 +435,13 @@ const routes = {
   "POST /api/login": async (req, res) => {
     const b = await readJson(req);
     const username = clean(b.username, 32).toLowerCase();
-    const keys = [[`${username}|${clientIp(req)}`, FAILURE_LIMITS.ip], [`${username}|*`, FAILURE_LIMITS.user]];
+    // The group-wide limit doesn't apply on the planner computer itself, so nobody can lock the organiser out there.
+    const keys = [[`${username}|${clientIp(req)}`, FAILURE_LIMITS.ip]];
+    if (!isLocal(req)) keys.push([`${username}|*`, FAILURE_LIMITS.user]);
     if (tooManyFailures(keys)) throw new UserError(429, "Too many attempts. Wait 15 minutes and try again.");
     const u = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
-    if (!u || !(await checkPassword(typeof b.password === "string" ? b.password : "", u))) {
+    const ok = await checkPassword(typeof b.password === "string" ? b.password : "", u || DUMMY_USER);
+    if (!u || !ok) {
       recordFailure(keys);
       throw new UserError(401, "Username or password is wrong.");
     }
@@ -487,8 +503,10 @@ const routes = {
   "POST /api/reset-password": async (req, res, user) => {
     need(user);
     if (!user.isOrganiser) throw new UserError(403, "Only the organiser can reset passwords.");
-    const target = db.prepare("SELECT id FROM users WHERE id = ?").get(Number((await readJson(req)).userId));
+    const target = db.prepare("SELECT id, username FROM users WHERE id = ?").get(Number((await readJson(req)).userId));
     if (!target) throw new UserError(404, "That person no longer exists.");
+    // Clear their sign-in lockout so the temporary password works straight away.
+    for (const k of failures.keys()) if (k.startsWith(`${target.username.toLowerCase()}|`)) failures.delete(k);
     const temp = crypto.randomBytes(5).toString("hex");
     const { salt, hash } = await hashPassword(temp);
     db.prepare("UPDATE users SET pass_hash = ?, salt = ? WHERE id = ?").run(hash, salt, target.id);
@@ -507,11 +525,18 @@ const routes = {
   "POST /api/password": async (req, res, user) => {
     need(user);
     const b = await readJson(req);
+    const keys = [[`password|${user.id}`, FAILURE_LIMITS.password]];
+    if (tooManyFailures(keys)) throw new UserError(429, "Too many attempts. Wait 15 minutes and try again.");
     const full = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
-    if (!(await checkPassword(typeof b.current === "string" ? b.current : "", full))) throw new UserError(401, "Your current password is wrong.");
+    if (!(await checkPassword(typeof b.current === "string" ? b.current : "", full))) {
+      recordFailure(keys);
+      throw new UserError(401, "Your current password is wrong.");
+    }
     if (typeof b.next !== "string" || b.next.length < 8) throw new UserError(400, "New passwords need at least 8 characters.");
     const { salt, hash } = await hashPassword(b.next);
     db.prepare("UPDATE users SET pass_hash = ?, salt = ? WHERE id = ?").run(hash, salt, user.id);
+    // Sign out everywhere else, in case someone else knew the old password or used a shared computer.
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token <> ?").run(user.id, user.token);
     send(res, 200, { ok: true });
   },
 };

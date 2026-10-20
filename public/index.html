@@ -493,7 +493,7 @@ $("pw-form").onsubmit = async e => {
   e.preventDefault();
   try {
     await api("POST", "/api/password", { current: $("pw-cur").value, next: $("pw-new").value });
-    $("pw-cur").value = $("pw-new").value = ""; setStatus($("pw-status"), "Password updated.", "ok");
+    $("pw-cur").value = $("pw-new").value = ""; setStatus($("pw-status"), "Password updated. You've been signed out on your other devices.", "ok");
   } catch (err) { setStatus($("pw-status"), err.message, "bad") }
 };
 
