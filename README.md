@@ -11,7 +11,11 @@ Everyone in the group creates an account and adds what they want from the trip. 
    - **On your Wi-Fi:** the address to send friends on the same network
    - **Group code:** friends need this once, when they create an account
 
-The first account you create becomes the **organiser**. The organiser can see the group code and reset anyone's password. Both are on the Trip details tab.
+The first account you create becomes the **organiser**. The organiser's tools are on the Trip details tab:
+
+- **See the group code.** Only the organiser can see it.
+- **Make a new code.** Use this if the code was shared too widely. Existing accounts keep working.
+- **Reset a forgotten password.**
 
 Keep the window open while people use the site. Closing it stops the site, but nothing is lost.
 
@@ -20,15 +24,16 @@ Keep the window open while people use the site. Closing it stops the site, but n
 **Build itinerary** runs Claude Code on the planner computer. Claude Code is Anthropic's official app, and it's signed in with your Claude plan (Pro, Max or Team), so builds count toward that plan's usage. You don't need an API key.
 
 - Claude Code has to be installed and signed in on this computer. To install it, run `npm install -g @anthropic-ai/claude-code`. To sign in, run `claude` once.
-- All of Claude Code's tools are switched off for builds. It only reads the trip details and preferences, and writes back the plan.
-- A build takes about 1 to 3 minutes.
+- For builds, Claude Code's tools, MCP servers, claude.ai connectors and settings hooks are all switched off. It only reads the trip details and preferences, and writes back the plan.
+- A build takes about 1 to 3 minutes. It runs in the background, and the page shows the result when it's ready. A build that takes longer than 10 minutes is stopped.
+- **Build limits:** to protect your Claude plan, each member can build once every 15 minutes, and the group gets 10 builds a day. The organiser can build any time.
 
 **Using an API key instead:** if you'd rather bill builds to the Anthropic API, set these two values before starting the planner:
 
 - `PLANNER_ENGINE=api`
 - `ANTHROPIC_API_KEY=sk-ant-...`
 
-API usage is billed at console.anthropic.com, at about 20 to 50 cents per build.
+API usage is billed at console.anthropic.com, at about 20 to 50 cents per build. The Anthropic SDK this mode uses is installed by `npm install` as an optional package.
 
 ## Where the data lives
 

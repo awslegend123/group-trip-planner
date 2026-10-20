@@ -214,7 +214,7 @@ textarea { resize: vertical; min-height: 64px }
       <h3>Pace and budget</h3>
       <div class="grid2">
         <div class="stack" style="gap:6px"><span class="label">Daily pace</span><div class="seg" id="p-pace"></div></div>
-        <div class="stack" style="gap:6px"><span class="label">Spending style</span><div class="seg" id="p-budget"></div></div>
+        <div class="stack" style="gap:6px"><span class="label">Spending style</span><div class="seg" id="p-spending"></div></div>
       </div>
     </div>
     <div class="card stack">
@@ -273,6 +273,7 @@ textarea { resize: vertical; min-height: 64px }
         </div>
       </div>
       <div class="progress" id="g-progress" hidden><div class="spinner"></div><span id="g-progress-text">Working…</span></div>
+      <p class="muted" id="g-limits" style="font-size:.85rem" hidden>To save the organiser's Claude plan, each person can build once every 15 minutes, up to 10 builds a day for the group.</p>
       <p class="status" id="g-status"></p>
     </div>
     <div id="plan" class="panel"></div>
@@ -283,7 +284,9 @@ textarea { resize: vertical; min-height: 64px }
     <div class="card stack" id="organiser-card" hidden>
       <div><h3>Invite the group</h3>
         <p class="muted">Send everyone the address of this site and this group code. They need it once, to create their account.</p></div>
-      <div><span class="code" id="invite-code"></span></div>
+      <div class="row"><span class="code" id="invite-code"></span>
+        <button class="btn small" type="button" id="new-code">New code</button>
+        <span class="status" id="code-status"></span></div>
       <div>
         <div class="label" style="margin-bottom:4px">Members</div>
         <div id="members"></div>
@@ -304,29 +307,22 @@ textarea { resize: vertical; min-height: 64px }
       <div><button class="btn small" id="s-add" type="button">Add destination</button></div>
     </div>
     <div class="card stack">
-      <label class="field">Group budget<select id="s-budget">
-        <option value="">Not decided</option><option>Shoestring</option><option>Moderate</option><option>Comfortable</option><option>Splurge</option></select></label>
+      <label class="field">Group budget<select id="s-budget"><option value="">Not decided</option></select></label>
       <label class="field">Anything else the planner should know <small>Flights, hotels already booked, fixed events</small>
         <textarea id="s-notes" maxlength="1000" placeholder="e.g. Land in Osaka 10am day 1; fly home from Tokyo evening of the last day"></textarea></label>
     </div>
     <div class="row">
       <button class="btn primary" id="s-save">Save trip details</button>
       <span class="status" id="s-status"></span>
+      <button class="btn small" type="button" id="s-reload" hidden>Load latest version</button>
     </div>
   </section>
 </div>
 
 <script>
-const INTERESTS = [
-  ["food", "Food & local eats"], ["markets", "Markets & street food"], ["cafes", "Cafés & desserts"],
-  ["scenery", "Scenery & viewpoints"], ["hiking", "Hiking & trails"], ["nature", "Parks & wildlife"],
-  ["water", "Beaches & water"], ["culture", "History & culture"], ["museums", "Museums & art"],
-  ["souvenirs", "Souvenirs & shopping"], ["photo", "Photo spots"], ["adventure", "Adventure activities"],
-  ["nightlife", "Nightlife & bars"], ["relax", "Spa & downtime"]
-];
-const LEVELS = ["Skip", "Fine", "Like", "Love"];
-const PACES = ["Relaxed", "Balanced", "Packed"];
-const BUDGETS = ["Save", "Mid", "Splurge"];
+// Option lists (interests, levels, paces, spending styles, group budgets) come from the server in /api/state.
+let OPT = null;
+const DEFAULT_LEVEL = 1;
 
 const $ = id => document.getElementById(id);
 function h(tag, attrs, ...kids) {
@@ -344,13 +340,13 @@ function setStatus(el, text, kind = "") { el.textContent = text; el.className = 
 async function api(method, url, body) {
   const res = await fetch(url, {
     method, credentials: "same-origin",
-    headers: body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {},
-    body: body !== undefined ? JSON.stringify(body) : (method !== "GET" ? "{}" : undefined),
+    headers: method !== "GET" ? { "Content-Type": "application/json" } : {},
+    body: method !== "GET" ? JSON.stringify(body ?? {}) : undefined,
   });
   let data = {};
   try { data = await res.json() } catch {}
-  if (res.status === 401 && url !== "/api/login" && url !== "/api/password") { showAuth(); throw new Error("Please sign in.") }
-  if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
+  if (res.status === 401 && url !== "/api/login" && url !== "/api/password") { showAuth(); throw Object.assign(new Error("Please sign in."), { status: 401 }) }
+  if (!res.ok) throw Object.assign(new Error(data.error || "Something went wrong. Try again."), { status: res.status });
   return data;
 }
 
@@ -385,14 +381,29 @@ function showAuth() {
   $("app").hidden = true; $("auth").hidden = false;
   setMode(firstAccount ? "register" : mode);
 }
-$("logout").onclick = async () => { try { await api("POST", "/api/logout") } catch {} ; state = null; prefsFilled = settingsFilled = false; showAuth() };
+// Clear everything the previous person saw or typed, so the next person on this browser starts clean.
+function clearPersonalState() {
+  state = null;
+  prefsDirty = settingsDirty = prefsFilled = false;
+  settingsBase = null;
+  resetUi.clear(); codeConfirm = false; localError = null;
+  resetPrefsForm("");
+  for (const id of ["pw-cur", "pw-new"]) $(id).value = "";
+  for (const id of ["p-status", "s-status", "pw-status", "g-status"]) setStatus($(id), "");
+}
+$("logout").onclick = async () => { try { await api("POST", "/api/logout") } catch {} ; clearPersonalState(); showAuth() };
 
-/* ---------- state ---------- */
+/* ---------- state and polling ---------- */
 let state = null;
-let prefsDirty = false, settingsDirty = false, prefsFilled = false, settingsFilled = false;
+let prefsDirty = false, settingsDirty = false, prefsFilled = false;
+let settingsBase = null; // updatedAt of the trip details the form was loaded from
 let pollTimer = null;
-function startPolling() { stopPolling(); pollTimer = setInterval(() => { if (!document.hidden) refresh() }, 15000) }
-function stopPolling() { clearInterval(pollTimer) }
+// Poll every 15s, or every 4s while a build is running so the result shows up quickly.
+function startPolling() {
+  stopPolling();
+  pollTimer = setTimeout(async () => { if (!document.hidden) await refresh(); startPolling() }, state?.generating ? 4000 : 15000);
+}
+function stopPolling() { clearTimeout(pollTimer) }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state) refresh() });
 
 async function enterApp() {
@@ -404,7 +415,8 @@ async function refresh() {
 }
 function applyState(s) {
   state = s;
-  $("who").textContent = `Signed in as ${s.me.name}${s.me.isOrganizer ? " · organiser" : ""}`;
+  if (!OPT) buildOptionControls(s.options);
+  $("who").textContent = `Signed in as ${s.me.name}${s.me.isOrganiser ? " · organiser" : ""}`;
   if (!prefsDirty) fillMyPrefs();
   if (!settingsDirty) fillSettings();
   renderHeader(); renderGroup(); renderOrganiser(); renderPlan();
@@ -430,24 +442,34 @@ function seg(container, name, options, love) {
     container.append(h("input", { type: "radio", name, id, value: i }), h("label", { for: id, class: i === 3 && love ? "love" : null, text: o }));
   });
 }
-for (const [k, label] of INTERESTS) {
-  const s = h("div", { class: "seg", role: "radiogroup", "aria-label": label });
-  seg(s, "i-" + k, LEVELS, true);
-  $("interests").append(h("div", { class: "irow" }, h("span", { text: label }), s));
+function buildOptionControls(options) {
+  OPT = options;
+  for (const [k, label] of OPT.interests) {
+    const s = h("div", { class: "seg", role: "radiogroup", "aria-label": label });
+    seg(s, "i-" + k, OPT.levels, true);
+    $("interests").append(h("div", { class: "irow" }, h("span", { text: label }), s));
+  }
+  seg($("p-pace"), "pace", OPT.paces); seg($("p-spending"), "spending", OPT.spending);
+  for (const b of OPT.groupBudgets) $("s-budget").append(h("option", { value: b, text: b }));
+  resetPrefsForm($("p-nick").value);
 }
-seg($("p-pace"), "pace", PACES); seg($("p-budget"), "pbudget", BUDGETS);
 function setRadio(name, v) { const el = document.querySelector(`input[name="${name}"][value="${v}"]`); if (el) el.checked = true }
 function getRadio(name, d = 1) { const el = document.querySelector(`input[name="${name}"]:checked`); return el ? +el.value : d }
-setRadio("pace", 1); setRadio("pbudget", 1); INTERESTS.forEach(([k]) => setRadio("i-" + k, 1));
-for (const id of ["p-nick", "interests", "p-pace", "p-budget", "p-must", "p-avoid", "p-diet", "p-mob"])
+function resetPrefsForm(name) {
+  $("p-nick").value = name;
+  OPT?.interests.forEach(([k]) => setRadio("i-" + k, DEFAULT_LEVEL));
+  setRadio("pace", 1); setRadio("spending", 1);
+  for (const id of ["p-must", "p-avoid", "p-diet", "p-mob"]) $(id).value = "";
+}
+for (const id of ["p-nick", "interests", "p-pace", "p-spending", "p-must", "p-avoid", "p-diet", "p-mob"])
   $(id).addEventListener("input", () => { prefsDirty = true; setStatus($("p-status"), "Unsaved changes") });
 
 function fillMyPrefs() {
-  $("p-nick").value = state.me.name;
   const mine = state.prefs.find(p => p.id === state.me.id);
+  resetPrefsForm(state.me.name);
   if (!mine) return;
-  INTERESTS.forEach(([k]) => setRadio("i-" + k, mine.interests?.[k] ?? 1));
-  setRadio("pace", mine.pace ?? 1); setRadio("pbudget", mine.budget ?? 1);
+  OPT.interests.forEach(([k]) => setRadio("i-" + k, mine.interests?.[k] ?? DEFAULT_LEVEL));
+  setRadio("pace", mine.pace ?? 1); setRadio("spending", mine.spending ?? 1);
   $("p-must").value = str(mine.mustDo, 600); $("p-avoid").value = str(mine.avoid, 600);
   $("p-diet").value = str(mine.dietary, 200); $("p-mob").value = str(mine.mobility, 200);
   if (!prefsFilled) { setStatus($("p-status"), "Your saved answers are loaded."); prefsFilled = true }
@@ -459,8 +481,8 @@ $("p-save").onclick = async () => {
   try {
     if (name !== state.me.name) await api("PUT", "/api/me", { displayName: name });
     const s = await api("PUT", "/api/prefs", {
-      interests: Object.fromEntries(INTERESTS.map(([k]) => [k, getRadio("i-" + k)])),
-      pace: getRadio("pace"), budget: getRadio("pbudget"),
+      interests: Object.fromEntries(OPT.interests.map(([k]) => [k, getRadio("i-" + k)])),
+      pace: getRadio("pace"), spending: getRadio("spending"),
       mustDo: $("p-must").value, avoid: $("p-avoid").value, dietary: $("p-diet").value, mobility: $("p-mob").value,
     });
     prefsDirty = false; applyState(s); setStatus(st, "Saved. Thanks!", "ok");
@@ -492,50 +514,76 @@ for (const id of ["s-name", "s-start", "s-days", "s-size", "s-budget", "s-notes"
 
 function fillSettings() {
   const s = state.settings || {};
+  settingsBase = s.updatedAt ?? null;
   $("s-name").value = str(s.name, 80); $("s-start").value = str(s.startDate, 10);
   $("s-days").value = s.days || 7; $("s-size").value = s.groupSize || 10;
   $("s-budget").value = str(s.budget, 20); $("s-notes").value = str(s.notes, 1000);
   $("s-dests").replaceChildren();
   const d = Array.isArray(s.destinations) ? s.destinations : [];
   if (d.length) d.forEach(x => destRow(str(x.name, 80), x.nights)); else destRow();
-  settingsFilled = true;
 }
 $("s-save").onclick = async () => {
   const st = $("s-status");
   $("s-save").disabled = true; setStatus(st, "Saving…");
   try {
     const s = await api("PUT", "/api/settings", {
+      baseUpdatedAt: settingsBase,
       name: $("s-name").value, startDate: $("s-start").value || null,
       days: $("s-days").value, groupSize: $("s-size").value,
       destinations: [...document.querySelectorAll("#s-dests .dest-row")].map(r => ({
         name: r.querySelector(".d-name").value, nights: r.querySelector(".d-nights").value })),
       budget: $("s-budget").value, notes: $("s-notes").value,
     });
-    settingsDirty = false; applyState(s); setStatus(st, "Saved.", "ok");
-  } catch (err) { setStatus(st, err.message, "bad") }
+    settingsDirty = false; $("s-reload").hidden = true; applyState(s); setStatus(st, "Saved.", "ok");
+  } catch (err) {
+    setStatus(st, err.message, "bad");
+    // Someone else saved first: offer their version. The user's edits stay on screen until they choose.
+    if (err.status === 409) { setStatus(st, err.message + " Load the latest version, then make your change again.", "bad"); $("s-reload").hidden = false }
+  }
   finally { $("s-save").disabled = false }
 };
+$("s-reload").onclick = () => {
+  settingsDirty = false; $("s-reload").hidden = true;
+  fillSettings();
+  const by = state.settings?.updatedBy;
+  setStatus($("s-status"), `Loaded the latest version${by ? `, saved by ${by}` : ""}.`, "ok");
+};
 
+/* ---------- organiser panel ---------- */
+// Kept outside renderOrganiser so a poll redrawing the list doesn't wipe a temporary password
+// or a half-finished confirm click.
+const resetUi = new Map(); // member id -> { confirm, text, kind }
+let codeConfirm = false;
 function renderOrganiser() {
-  $("organiser-card").hidden = !state.me.isOrganizer;
-  if (!state.me.isOrganizer) return;
+  $("organiser-card").hidden = !state.me.isOrganiser;
+  if (!state.me.isOrganiser) return;
   $("invite-code").textContent = state.inviteCode;
+  $("new-code").textContent = codeConfirm ? "Click again to confirm" : "New code";
   const list = $("members"); list.replaceChildren();
   for (const m of state.members) {
-    const out = h("span", { class: "status" });
-    const btn = m.id === state.me.id ? null : h("button", { class: "btn small", type: "button", text: "Reset password" });
+    const ui = resetUi.get(m.id) || {};
+    const out = h("span", { class: "status" + (ui.kind ? " " + ui.kind : ""), text: ui.text || "" });
+    const btn = m.id === state.me.id ? null : h("button", { class: "btn small", type: "button", text: ui.confirm ? "Click again to confirm" : "Reset password" });
     if (btn) btn.onclick = async () => {
-      if (btn.dataset.confirm !== "1") { btn.dataset.confirm = "1"; btn.textContent = "Click again to confirm"; return }
+      if (!ui.confirm) { resetUi.set(m.id, { confirm: true }); renderOrganiser(); return }
       btn.disabled = true;
-      try { const r = await api("POST", "/api/reset-password", { userId: m.id }); out.textContent = `Temporary password: ${r.tempPassword}`; out.className = "status ok" }
-      catch (err) { setStatus(out, err.message, "bad") }
-      finally { btn.disabled = false; btn.dataset.confirm = ""; btn.textContent = "Reset password" }
+      try {
+        const r = await api("POST", "/api/reset-password", { userId: m.id });
+        resetUi.set(m.id, { text: `Temporary password: ${r.tempPassword}. Send it to ${m.name}; they can change it after signing in.`, kind: "ok" });
+      } catch (err) { resetUi.set(m.id, { text: err.message, kind: "bad" }) }
+      renderOrganiser();
     };
     list.append(h("div", { class: "member" },
-      h("div", {}, h("b", { text: m.name }), h("span", { class: "muted", text: ` @${m.username}${m.isOrganizer ? " · organiser" : ""}` })),
+      h("div", {}, h("b", { text: m.name }), h("span", { class: "muted", text: ` @${m.username}${m.isOrganiser ? " · organiser" : ""}` })),
       h("div", { class: "row", style: "gap:8px" }, out, btn)));
   }
 }
+$("new-code").onclick = async () => {
+  if (!codeConfirm) { codeConfirm = true; renderOrganiser(); setStatus($("code-status"), "The old code will stop working for new sign-ups."); return }
+  codeConfirm = false;
+  try { applyState(await api("POST", "/api/invite-code")); setStatus($("code-status"), "New code made. Existing accounts keep working.", "ok") }
+  catch (err) { setStatus($("code-status"), err.message, "bad"); renderOrganiser() }
+};
 
 /* ---------- header and group ---------- */
 function renderHeader() {
@@ -560,7 +608,7 @@ function renderGroup() {
   $("group-sub").textContent = n ? `${n} of ${size} have answered. Bars show average enthusiasm, 0 (skip) to 3 (love).` : "No one has answered yet. Ask everyone to fill in My preferences.";
   const bars = $("bars"); bars.replaceChildren();
   if (n) {
-    INTERESTS.map(([k, l]) => ({ l, avg: state.prefs.reduce((a, p) => a + (p.interests?.[k] ?? 1), 0) / n }))
+    OPT.interests.map(([k, l]) => ({ l, avg: state.prefs.reduce((a, p) => a + (p.interests?.[k] ?? DEFAULT_LEVEL), 0) / n }))
       .sort((a, b) => b.avg - a.avg)
       .forEach((s, i) => bars.append(h("div", { class: "bar" + (i < 3 ? " top" : "") },
         h("span", { text: s.l }),
@@ -569,11 +617,11 @@ function renderGroup() {
   }
   const ppl = $("people"); ppl.replaceChildren();
   for (const p of state.prefs) {
-    const loves = INTERESTS.filter(([k]) => p.interests?.[k] === 3).map(([, l]) => l);
-    const likes = INTERESTS.filter(([k]) => p.interests?.[k] === 2).map(([, l]) => l);
+    const loves = OPT.interests.filter(([k]) => p.interests?.[k] === 3).map(([, l]) => l);
+    const likes = OPT.interests.filter(([k]) => p.interests?.[k] === 2).map(([, l]) => l);
     ppl.append(h("div", { class: "card person" },
       h("div", {}, h("b", { text: p.name + (p.id === state.me.id ? " (you)" : "") }),
-        h("div", { class: "muted", style: "font-size:.8rem", text: `${PACES[p.pace ?? 1]} pace · ${BUDGETS[p.budget ?? 1]} spending` })),
+        h("div", { class: "muted", style: "font-size:.8rem", text: `${OPT.paces[p.pace ?? 1]} pace · ${OPT.spending[p.spending ?? 1]} spending` })),
       (loves.length || likes.length) ? h("div", { class: "chips" }, loves.map(l => h("span", { class: "chip love", text: "♥ " + l })), likes.map(l => h("span", { class: "chip", text: l }))) : null,
       p.mustDo ? h("p", {}, h("span", { class: "label" }, "Must-do "), p.mustDo) : null,
       p.avoid ? h("p", {}, h("span", { class: "label" }, "Skip "), p.avoid) : null,
@@ -583,7 +631,17 @@ function renderGroup() {
 }
 
 /* ---------- itinerary ---------- */
-let building = false, buildStart = 0, buildTimer = null;
+// A build runs on the server in the background; the page learns its progress and result from
+// state.generating and state.lastBuild on each poll.
+let requesting = false, localError = null;
+function progressText() {
+  const g = state?.generating; if (!g) return "";
+  const secs = Math.max(0, Math.round((Date.now() - Date.parse(g.startedAt)) / 1000));
+  const who = g.by === state.me.name ? "Claude is" : `${g.by} started a build. Claude is`;
+  return `${who} weighing everyone's preferences… ${secs}s (usually 1 to 3 minutes)`;
+}
+setInterval(() => { if (state?.generating) $("g-progress-text").textContent = progressText() }, 1000);
+
 function renderReadiness() {
   const s = state.settings || {};
   const dests = (s.destinations || []).length > 0, n = state.prefs.length, size = s.groupSize || 10;
@@ -591,16 +649,24 @@ function renderReadiness() {
     h("span", { class: dests ? "ok" : "no", text: dests ? "Destinations set" : "Add destinations in Trip details" }),
     h("span", { class: s.days ? "ok" : "no", text: s.days ? `${s.days} days` : "Set the trip length in Trip details" }),
     h("span", { class: n ? "ok" : "no", text: `${n} of ${size} preferences in` + (n && n < size ? " (you can build now and rebuild later)" : "") }));
-  const othersBuilding = state.generating && !building;
-  $("g-build").disabled = building || othersBuilding || !(dests && s.days && n);
+  const gen = state.generating;
+  $("g-build").disabled = requesting || !!gen || !(dests && s.days && n);
   $("g-build").textContent = state.itinerary ? "Rebuild with latest answers" : "Build itinerary";
-  if (othersBuilding) { $("g-progress").hidden = false; $("g-progress-text").textContent = `${state.generating.by} is building the itinerary…` }
-  else if (!building) $("g-progress").hidden = true;
-  const it = state.itinerary;
-  if (it && !building && !$("g-status").classList.contains("bad")) {
+  $("g-progress").hidden = !gen;
+  if (gen) { $("g-progress-text").textContent = progressText(); localError = null }
+  $("g-limits").hidden = state.me.isOrganiser;
+
+  const it = state.itinerary, lb = state.lastBuild, st = $("g-status");
+  if (gen) setStatus(st, "");
+  else if (localError) setStatus(st, localError, "bad");
+  else if (lb && !lb.ok && (!it || lb.at > it.generatedAt)) setStatus(st, `The last build, started by ${lb.by}, didn't finish: ${lb.error}`, "bad");
+  else if (it) {
     const newer = state.prefs.some(p => p.updatedAt > it.generatedAt) || (s.updatedAt && s.updatedAt > it.generatedAt);
-    setStatus($("g-status"), newer ? "Answers or trip details changed since this plan was built. Rebuild to include them." : "");
-  }
+    const fresh = lb?.ok && Date.now() - Date.parse(lb.at) < 2 * 60e3;
+    if (newer) setStatus(st, "Answers or trip details changed since this plan was built. Rebuild to include them.");
+    else if (fresh) setStatus(st, "New itinerary ready and saved for the whole group.", "ok");
+    else setStatus(st, "");
+  } else setStatus(st, "");
 }
 function dayDate(i) {
   const s = state.settings?.startDate; if (!s) return "";
@@ -664,16 +730,11 @@ function renderPlan() {
 }
 
 $("g-build").onclick = async () => {
-  if (building) return;
-  building = true; buildStart = Date.now();
-  setStatus($("g-status"), ""); $("g-build").disabled = true; $("g-progress").hidden = false;
-  const tick = () => $("g-progress-text").textContent = `Claude is weighing everyone's preferences… ${Math.round((Date.now() - buildStart) / 1000)}s (usually 1 to 3 minutes)`;
-  tick(); buildTimer = setInterval(tick, 1000);
-  try {
-    const s = await api("POST", "/api/itinerary");
-    building = false; applyState(s); setStatus($("g-status"), "Saved for the whole group.", "ok");
-  } catch (err) { building = false; setStatus($("g-status"), err.message, "bad"); renderReadiness() }
-  finally { clearInterval(buildTimer); $("g-progress").hidden = !state?.generating || building }
+  if (requesting || state?.generating) return;
+  requesting = true; localError = null; renderReadiness();
+  try { applyState(await api("POST", "/api/itinerary")) }
+  catch (err) { localError = err.message }
+  finally { requesting = false; renderReadiness(); startPolling() }
 };
 
 $("g-copy").onclick = async () => {

@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.135.0"
   }
 }
