@@ -450,10 +450,11 @@ const routes = {
     send(res, 200, stateFor(user));
   },
 
-  // The page sends the updatedAt of the version it was editing, so a save can't silently
-  // replace someone else's newer changes.
+  // Organiser only. The page sends the updatedAt of the version it was editing, so a save can't
+  // silently replace newer changes (e.g. from the organiser's other tab or device).
   "PUT /api/settings": async (req, res, user) => {
     need(user);
+    if (!user.isOrganiser) throw new UserError(403, "Only the organiser can change the trip details.");
     const b = await readJson(req);
     const current = kvGet("settings");
     if (current && current.updatedAt !== b.baseUpdatedAt)

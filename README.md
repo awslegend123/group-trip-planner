@@ -13,6 +13,7 @@ Everyone in the group creates an account and adds what they want from the trip. 
 
 The first account you create becomes the **organiser**. The organiser's tools are on the Trip details tab:
 
+- **Edit the trip details** (name, dates, destinations, budget, notes). Everyone else sees them read-only.
 - **See the group code.** Only the organiser can see it.
 - **Make a new code.** Use this if the code was shared too widely. Existing accounts keep working.
 - **Reset a forgotten password.**

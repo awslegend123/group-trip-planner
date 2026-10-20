@@ -293,7 +293,7 @@ textarea { resize: vertical; min-height: 64px }
       </div>
     </div>
     <div class="card stack">
-      <div><h2>Trip details</h2><p class="muted">The basics everyone plans around. Anyone in the group can update these.</p></div>
+      <div><h2>Trip details</h2><p class="muted" id="s-intro">The basics everyone plans around.</p></div>
       <div class="grid2">
         <label class="field">Trip name<input type="text" id="s-name" maxlength="80" placeholder="e.g. Japan, spring 2027"></label>
         <label class="field">Start date <small>Optional</small><input type="date" id="s-start"></label>
@@ -311,7 +311,7 @@ textarea { resize: vertical; min-height: 64px }
       <label class="field">Anything else the planner should know <small>Flights, hotels already booked, fixed events</small>
         <textarea id="s-notes" maxlength="1000" placeholder="e.g. Land in Osaka 10am day 1; fly home from Tokyo evening of the last day"></textarea></label>
     </div>
-    <div class="row">
+    <div class="row" id="s-actions">
       <button class="btn primary" id="s-save">Save trip details</button>
       <span class="status" id="s-status"></span>
       <button class="btn small" type="button" id="s-reload" hidden>Load latest version</button>
@@ -503,7 +503,7 @@ function destRow(name = "", nights = "") {
   const row = h("div", { class: "dest-row" },
     h("input", { type: "text", maxlength: "80", placeholder: "City or region", "aria-label": "Destination", class: "d-name" }),
     h("input", { type: "number", min: "0", max: "30", placeholder: "Nights", "aria-label": "Nights", class: "d-nights" }),
-    h("button", { class: "btn small", type: "button", text: "Remove" }));
+    h("button", { class: "btn small d-remove", type: "button", text: "Remove" }));
   row.querySelector(".d-name").value = name; row.querySelector(".d-nights").value = nights ?? "";
   row.querySelector("button").onclick = () => { row.remove(); markSettingsDirty() };
   row.addEventListener("input", markSettingsDirty);
@@ -521,6 +521,17 @@ function fillSettings() {
   $("s-dests").replaceChildren();
   const d = Array.isArray(s.destinations) ? s.destinations : [];
   if (d.length) d.forEach(x => destRow(str(x.name, 80), x.nights)); else destRow();
+  applySettingsAccess();
+}
+// Only the organiser edits trip details (the server enforces it); everyone else sees them read-only.
+function applySettingsAccess() {
+  const can = state.me.isOrganiser;
+  for (const el of document.querySelectorAll("#tab-trip input, #tab-trip select, #tab-trip textarea"))
+    if (!el.closest("#organiser-card")) el.disabled = !can;
+  for (const el of document.querySelectorAll("#s-add, #s-actions, #tab-trip .d-remove")) el.hidden = !can;
+  $("s-intro").textContent = can
+    ? "The basics everyone plans around. Only you, as organiser, can change these."
+    : "The basics everyone plans around. Only the organiser can change these; ask them if something needs updating.";
 }
 $("s-save").onclick = async () => {
   const st = $("s-status");
@@ -646,8 +657,8 @@ function renderReadiness() {
   const s = state.settings || {};
   const dests = (s.destinations || []).length > 0, n = state.prefs.length, size = s.groupSize || 10;
   $("readiness").replaceChildren(
-    h("span", { class: dests ? "ok" : "no", text: dests ? "Destinations set" : "Add destinations in Trip details" }),
-    h("span", { class: s.days ? "ok" : "no", text: s.days ? `${s.days} days` : "Set the trip length in Trip details" }),
+    h("span", { class: dests ? "ok" : "no", text: dests ? "Destinations set" : state.me.isOrganiser ? "Add destinations in Trip details" : "Waiting for the organiser to add destinations" }),
+    h("span", { class: s.days ? "ok" : "no", text: s.days ? `${s.days} days` : state.me.isOrganiser ? "Set the trip length in Trip details" : "Waiting for the organiser to set the trip length" }),
     h("span", { class: n ? "ok" : "no", text: `${n} of ${size} preferences in` + (n && n < size ? " (you can build now and rebuild later)" : "") }));
   const gen = state.generating;
   $("g-build").disabled = requesting || !!gen || !(dests && s.days && n);
