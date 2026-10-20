@@ -189,6 +189,7 @@ textarea { resize: vertical; min-height: 64px }
       </div>
     </div>
     <div class="route" id="route"></div>
+    <p class="status bad" id="offline" role="alert" hidden>Can't reach the planner right now, so this page may be out of date. It will update when the planner is back.</p>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -411,7 +412,11 @@ async function enterApp() {
   await refresh(); startPolling();
 }
 async function refresh() {
-  try { applyState(await api("GET", "/api/state")) } catch {}
+  let s;
+  try { s = await api("GET", "/api/state") }
+  catch (err) { if (err.status !== 401) $("offline").hidden = false; return } // 401: api() already showed sign-in
+  $("offline").hidden = true;
+  try { applyState(s) } catch (err) { console.error("Couldn't show the latest state:", err) }
 }
 function applyState(s) {
   state = s;
